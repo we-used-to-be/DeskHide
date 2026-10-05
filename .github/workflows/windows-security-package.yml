@@ -1,0 +1,102 @@
+name: Windows Security and Package
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  pull_request:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-security-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-build-package:
+    name: CodeQL, build, test, and package
+    runs-on: windows-2025
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate release tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: powershell
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>\d+\.\d+\.\d+)$') {
+            throw 'Release tags must use vMAJOR.MINOR.PATCH.'
+          }
+          $tagVersion = $Matches.version
+          $cmakeVersion = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'project\(DeskHide VERSION (\d+\.\d+\.\d+)').Groups[1].Value
+          $resourceVersion = [regex]::Match((Get-Content assets/app.rc -Raw), 'VALUE "ProductVersion", "(\d+\.\d+\.\d+)').Groups[1].Value
+          $installerVersions = [regex]::Matches((Get-Content installer/setup.iss -Raw), '(?:AppVersion "|OutputBaseFilename=DeskHide-)(\d+\.\d+\.\d+)') | ForEach-Object { $_.Groups[1].Value }
+          $archiveVersions = [regex]::Matches((Get-Content scripts/build.ps1 -Raw), 'DeskHide-(\d+\.\d+\.\d+)-') | ForEach-Object { $_.Groups[1].Value }
+          $versions = @($cmakeVersion, $resourceVersion) + @($installerVersions) + @($archiveVersions)
+          if (!$cmakeVersion -or !$resourceVersion -or !$installerVersions -or !$archiveVersions -or @($versions | Select-Object -Unique).Count -ne 1 -or $versions[0] -ne $tagVersion) {
+            throw "Release tag $env:GITHUB_REF_NAME must match the project, executable, installer, and archive versions."
+          }
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: cpp
+          build-mode: manual
+
+      - name: Build, run targeted tests, and package
+        shell: powershell
+        run: .\scripts\build.ps1 -Package -IsccPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+
+      - name: Analyze with CodeQL
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        uses: github/codeql-action/analyze@v4
+
+      - name: Save packages and checksums
+        uses: actions/upload-artifact@v6
+        with:
+          name: DeskHide-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/*.exe
+            artifacts/*.zip
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: security-build-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified packages
+        uses: actions/download-artifact@v6
+        with:
+          name: DeskHide-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+
+      - name: Publish release and attach packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=()
+          while IFS= read -r -d '' asset; do assets+=("$asset"); done < <(find artifacts -maxdepth 1 -type f -print0)
+          if [ "${#assets[@]}" -lt 5 ]; then
+            echo "Expected package files and checksums in the build artifact." >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag --title "DeskHide $GITHUB_REF_NAME" --generate-notes

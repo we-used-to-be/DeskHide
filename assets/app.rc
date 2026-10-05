@@ -1,0 +1,25 @@
+#include <windows.h>
+#pragma code_page(65001)
+1 ICON "deskh.ico"
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080404B0"
+    BEGIN
+      VALUE "FileDescription", "桌隐 - 双击桌面隐藏图标\0"
+      VALUE "FileVersion", "1.0.0\0"
+      VALUE "ProductName", "DeskHide 桌隐\0"
+      VALUE "ProductVersion", "1.0.0\0"
+      VALUE "OriginalFilename", "DeskHide.exe\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0804, 1200
+  END
+END
