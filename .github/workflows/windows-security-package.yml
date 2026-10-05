@@ -99,4 +99,4 @@ jobs:
             echo "Expected package files and checksums in the build artifact." >&2
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag --title "DeskHide $GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --title "DeskHide $GITHUB_REF_NAME" --generate-notes
